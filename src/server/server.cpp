@@ -2,38 +2,66 @@
 #include "server/server.hpp"
 #include <iostream>
 #include <cstring>
+#include <sstream>
 #include <unistd.h>
 #include <arpa/inet.h>
 #include <thread>
+#include <algorithm>
 
 Server::Server(int port) : port(port), thread_pool(std::thread::hardware_concurrency()) {}
 
 void Server::handle_client(int client_socket) {
-    std::cout << "start handling client " << std::this_thread::get_id() << std::endl; //! test
     char buffer[1024] = {0};
     ssize_t bytes = read(client_socket, buffer, sizeof(buffer));
     if (bytes == -1) {
-        perror("read failed");
+        perror("ERROR: read failed.");
         close(client_socket);
         return;
     }
 
     
-    std::cout << "received: " << buffer << std::endl;
-    std::this_thread::sleep_for(std::chrono::seconds(3)); //! test
-    const char* reply = "hello from server";
-    if (send(client_socket, reply, strlen(reply), 0) == -1) {
-        perror("send failed");
+    std::cout << "Received: " << buffer << std::endl;
+    std::istringstream iss(buffer);
+    std::string cmd;
+    int n;
+    iss >> cmd >> n;
+    if (cmd != "MERGE_SORT" || n <= 0) {
+        std::string err = "ERROR: invalid request.";
+        send(client_socket, err.c_str(), err.size(), 0);
+        close(client_socket);
+        return;
+    }
+
+    std::vector<int> arr(n);
+    for (int i = 0; i < n; i++) {
+        if (!(iss>>arr[i])) {
+            std::string err = "ERROR: invalid data.";
+            send(client_socket, err.c_str(), err.size(), 0);
+            close(client_socket);
+            return;
+        }
+    }
+
+    std::sort(arr.begin(), arr.end());
+
+    std::ostringstream oss;
+    for (int x : arr) {
+        oss << x << " ";
+    }
+
+    std::string response = oss.str();
+
+    if (send(client_socket, response.c_str(), response.size(), 0) == -1) {
+        perror("ERROR: send failed.");
     } 
-    std::cout << "finish client " << std::this_thread::get_id() << std::endl; //! test
     close(client_socket);
-    std::cout << "client disconnected\n";
+    std::cout << "Client disconnected.\n";
 }
 
 void Server::run() {
     server_fd = socket(AF_INET, SOCK_STREAM, 0);
     if (server_fd == -1) {
-        perror("socket failed");
+        perror("ERROR: socket failed.");
         return;
     }
 
@@ -47,16 +75,16 @@ void Server::run() {
     hint.sin_addr.s_addr = INADDR_ANY;
 
     if (bind(server_fd, (sockaddr*)&hint, sizeof(hint)) == -1) {
-        perror("bind failed");
+        perror("ERROR: bind failed.");
         return;
     }
     
     if (listen(server_fd, 1) == -1) {
-        perror("listen failed");
+        perror("ERROR: listen failed.");
         return;
     }
 
-    std::cout << "server listening on port " << port << "...\n";
+    std::cout << "Server listening on port: " << port << "...\n";
 
     while (true) {
         sockaddr_in client;
@@ -64,11 +92,11 @@ void Server::run() {
     
         int client_socket = accept(server_fd, (sockaddr*)&client, &client_size);
         if (client_socket == -1) {
-            perror("client failed");
+            perror("ERROR: client failed.");
             continue;
         }
 
-        std::cout << "client connected\n";
+        std::cout << "Client connected.\n";
         thread_pool.enqueue([this, client_socket]() {
             handle_client(client_socket);
         });
