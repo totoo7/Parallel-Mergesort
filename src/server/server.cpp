@@ -1,5 +1,6 @@
 
 #include "server/server.hpp"
+#include "algorithms/merge_sort.hpp"
 #include <iostream>
 #include <cstring>
 #include <sstream>
@@ -42,7 +43,7 @@ void Server::handle_client(int client_socket) {
         }
     }
 
-    std::sort(arr.begin(), arr.end());
+    merge_sort(arr);
 
     std::ostringstream oss;
     for (int x : arr) {
