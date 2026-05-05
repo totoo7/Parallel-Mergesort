@@ -21,18 +21,20 @@ static void merge(std::vector<int>& arr, int left, int mid, int right) {
         arr[left + k] = temp[k]; 
     }
 }
-
-static void merge_sort_helper(std::vector<int>& arr, int left, int right) {
+static void parallel_merge_sort(std::vector<int>& arr, int left, int right, ThreadPool& thread_pool) {
     if (left >= right) return;
 
     int mid = left + (right - left) / 2;
-    merge_sort_helper(arr, left, mid);
-    merge_sort_helper(arr, mid + 1, right);
+
+    auto left_future = thread_pool.enqueue([&arr, left, mid, &thread_pool]() {
+        parallel_merge_sort(arr, left, mid, thread_pool);
+    });
+    parallel_merge_sort(arr, mid + 1, right, thread_pool);
 
     merge(arr, left, mid, right);
 }
 
-void merge_sort(std::vector<int>& arr) {
+void parallel_merge_sort(std::vector<int>& arr, ThreadPool& pool) {
     if (arr.empty()) return;
-    merge_sort_helper(arr, 0, arr.size() - 1);
+    parallel_merge_sort(arr, 0, arr.size() - 1, pool);
 }

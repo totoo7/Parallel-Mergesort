@@ -7,11 +7,15 @@
 #include <functional>
 #include <mutex>
 #include <condition_variable>
+#include <future>
 
 class ThreadPool {
     public:
         ThreadPool(size_t num_threads);
-        void enqueue(std::function<void()> task);
+
+        template<typename T> 
+        auto enqueue(T task) -> std::future<decltype(task())>;
+
         ~ThreadPool();
     private:
         std::vector<std::thread> workers;
@@ -20,5 +24,25 @@ class ThreadPool {
         std::condition_variable condition;
         bool stop = false;
 };
+
+template<typename T>
+auto ThreadPool::enqueue(T task) -> std::future<decltype(task())> {
+    using ReturnType = decltype(task());
+
+    auto wrapper = std::make_shared<std::packaged_task<ReturnType()>>(std::move(task));
+
+    std::future<ReturnType> result = wrapper->get_future();
+
+    {
+        std::unique_lock<std::mutex> lock(queue_mutex);
+        tasks.emplace([wrapper]() {
+            (*wrapper)();
+        });
+    }
+
+    condition.notify_one();
+    return result;
+}
+
 
 #endif

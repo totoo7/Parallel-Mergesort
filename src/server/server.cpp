@@ -43,7 +43,7 @@ void Server::handle_client(int client_socket) {
         }
     }
 
-    merge_sort(arr);
+    parallel_merge_sort(arr, thread_pool);
 
     std::ostringstream oss;
     for (int x : arr) {
