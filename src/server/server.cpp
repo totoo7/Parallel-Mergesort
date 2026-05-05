@@ -33,6 +33,13 @@ void Server::handle_client(int client_socket) {
         return;
     }
 
+    if (n <= 0 || n > 1000000) {
+        std::string err = "ERROR: Invalid size\n";
+        send(client_socket, err.c_str(), err.size(), 0);
+        close(client_socket);
+        return;
+    }
+
     std::vector<int> arr(n);
     for (int i = 0; i < n; i++) {
         if (!(iss>>arr[i])) {
@@ -43,7 +50,15 @@ void Server::handle_client(int client_socket) {
         }
     }
 
+    auto start = std::chrono::high_resolution_clock::now();
+
     parallel_merge_sort(arr, thread_pool);
+
+    auto end = std::chrono::high_resolution_clock::now();
+
+    std::cout << "Time: "
+            << std::chrono::duration<double, std::milli>(end - start).count()
+            << " ms\n";
 
     std::ostringstream oss;
     for (int x : arr) {
