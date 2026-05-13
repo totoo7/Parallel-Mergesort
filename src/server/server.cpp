@@ -8,6 +8,8 @@
 #include <arpa/inet.h>
 #include <thread>
 #include <algorithm>
+#include <random>
+#include <chrono>
 
 Server::Server(int port) : port(port), thread_pool(std::thread::hardware_concurrency()) {}
 
@@ -19,13 +21,85 @@ void Server::handle_client(int client_socket) {
         close(client_socket);
         return;
     }
-
     
     std::cout << "Received: " << buffer << std::endl;
     std::istringstream iss(buffer);
+    int benchmark_flag;
+    iss >> benchmark_flag;
+    if (benchmark_flag == 1) {
+
+        std::vector<int> thread_counts = {1, 2, 4, 8};
+
+        const int ARRAY_SIZE = 100000;
+        const int RUNS_PER_TEST = 5;
+
+        std::stringstream response;
+
+        std::random_device rd;
+        std::mt19937 gen(rd());
+
+        std::uniform_int_distribution<> dist(1, 1000000);
+
+        std::vector<int> original(ARRAY_SIZE);
+
+        for (int& x : original) {
+            x = dist(gen);
+        }
+
+        double serial_time = 0.0;
+
+        for (int run = 0; run < RUNS_PER_TEST; run++) {
+            std::vector<int> arr = original;
+            ThreadPool pool(1);
+            auto start = std::chrono::high_resolution_clock::now();
+            parallel_merge_sort(arr, pool);
+            auto end = std::chrono::high_resolution_clock::now();
+            serial_time += std::chrono::duration<double, std::milli>(end - start).count();
+        }
+
+        serial_time /= RUNS_PER_TEST;
+
+        response << "Threads: 1"
+                << " Average: "
+                << serial_time
+                << " ms"
+                << " Speedup: 1.0\n";
+
+        for (int thread_count : thread_counts) {
+
+            if (thread_count == 1)
+                continue;
+
+            double total_time = 0.0;
+            for (int run = 0; run < RUNS_PER_TEST; run++) {
+                std::vector<int> arr = original;
+                ThreadPool pool(thread_count);
+                auto start = std::chrono::high_resolution_clock::now();
+                parallel_merge_sort(arr, pool);
+                auto end = std::chrono::high_resolution_clock::now();
+                total_time += std::chrono::duration<double, std::milli>(end - start).count();
+            }
+            double average = total_time / RUNS_PER_TEST;
+            double speedup = serial_time / average;
+            response << "Threads: "
+                    << thread_count
+                    << " Average: "
+                    << average
+                    << " ms"
+                    << " Speedup: "
+                    << speedup
+                    << "\n";
+        }
+        std::string result = response.str();
+        send(client_socket, result.c_str(), result.size(), 0);
+        close(client_socket);
+        return;
+    }
+
     std::string cmd;
     int n;
-    iss >> cmd >> n;
+    int thread_count;
+    iss >> cmd >> n >> thread_count;
     if (cmd != "MERGE_SORT" || n <= 0) {
         std::string err = "ERROR: invalid request.";
         send(client_socket, err.c_str(), err.size(), 0);
@@ -52,7 +126,8 @@ void Server::handle_client(int client_socket) {
 
     auto start = std::chrono::high_resolution_clock::now();
 
-    parallel_merge_sort(arr, thread_pool);
+    ThreadPool local_pool(thread_count);
+    parallel_merge_sort(arr, local_pool);
 
     auto end = std::chrono::high_resolution_clock::now();
 

@@ -15,7 +15,7 @@ class ThreadPool {
 
         template<typename T> 
         auto enqueue(T task) -> std::future<decltype(task())>;
-
+        size_t size() const { return workers.size(); }
         ~ThreadPool();
     private:
         std::vector<std::thread> workers;
