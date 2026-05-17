@@ -13,140 +13,129 @@
 
 Server::Server(int port) : port(port), thread_pool(std::thread::hardware_concurrency()) {}
 
-void Server::handle_client(int client_socket) {
-    char buffer[1024] = {0};
-    ssize_t bytes = read(client_socket, buffer, sizeof(buffer));
-    if (bytes == -1) {
-        perror("ERROR: read failed.");
-        close(client_socket);
-        return;
-    }
+std::string Server::run_benchmark() {
+    std::vector<int> thread_counts = {1, 2, 4, 8};
+
+    const int ARRAY_SIZE = 100000;
+    const int RUNS_PER_TEST = 5;
+
+    std::stringstream response;
+    std::random_device rd;
+    std::mt19937 gen(rd());
+    std::uniform_int_distribution<> dist(1, 1000000);
+    std::vector<int> original(ARRAY_SIZE);
+
+    for (int& x : original) 
+        x = dist(gen);
     
-    std::cout << "Received: " << buffer << std::endl;
-    std::istringstream iss(buffer);
-    int benchmark_flag;
-    iss >> benchmark_flag;
-    if (benchmark_flag == 1) {
+    double serial_time = 0.0;
 
-        std::vector<int> thread_counts = {1, 2, 4, 8};
-
-        const int ARRAY_SIZE = 100000;
-        const int RUNS_PER_TEST = 5;
-
-        std::stringstream response;
-
-        std::random_device rd;
-        std::mt19937 gen(rd());
-
-        std::uniform_int_distribution<> dist(1, 1000000);
-
-        std::vector<int> original(ARRAY_SIZE);
-
-        for (int& x : original) {
-            x = dist(gen);
-        }
-
-        double serial_time = 0.0;
-
+    for (int thread_count : thread_counts) {
+        double total_time = 0.0;
         for (int run = 0; run < RUNS_PER_TEST; run++) {
             std::vector<int> arr = original;
-            ThreadPool pool(1);
+            ThreadPool pool(thread_count);
             auto start = std::chrono::high_resolution_clock::now();
             parallel_merge_sort(arr, pool);
             auto end = std::chrono::high_resolution_clock::now();
-            serial_time += std::chrono::duration<double, std::milli>(end - start).count();
+            total_time += std::chrono::duration<double, std::milli>(end - start).count();
         }
 
-        serial_time /= RUNS_PER_TEST;
+        double average = total_time / RUNS_PER_TEST;
 
-        response << "Threads: 1"
-                << " Average: "
-                << serial_time
-                << " ms"
-                << " Speedup: 1.0\n";
+        if (thread_count == 1)
+            serial_time = average;
 
-        for (int thread_count : thread_counts) {
+        double speedup = serial_time / average;
 
-            if (thread_count == 1)
-                continue;
+        response << "Threads: "
+                 << thread_count
+                 << " Average: "
+                 << average
+                 << " ms"
+                 << " Speedup: "
+                 << speedup
+                 << "\n";
+    }
 
-            double total_time = 0.0;
-            for (int run = 0; run < RUNS_PER_TEST; run++) {
-                std::vector<int> arr = original;
-                ThreadPool pool(thread_count);
-                auto start = std::chrono::high_resolution_clock::now();
-                parallel_merge_sort(arr, pool);
-                auto end = std::chrono::high_resolution_clock::now();
-                total_time += std::chrono::duration<double, std::milli>(end - start).count();
-            }
-            double average = total_time / RUNS_PER_TEST;
-            double speedup = serial_time / average;
-            response << "Threads: "
-                    << thread_count
-                    << " Average: "
-                    << average
-                    << " ms"
-                    << " Speedup: "
-                    << speedup
-                    << "\n";
+    return response.str();
+}
+
+void Server::handle_client(int client_socket) {
+    while (true) {
+        char buffer[1024] = {0};
+        ssize_t bytes = read(client_socket, buffer, sizeof(buffer));
+        if (bytes <= 0) {
+            std::cout << "Client disconnected.\n";
+            break;
         }
-        std::string result = response.str();
-        send(client_socket, result.c_str(), result.size(), 0);
-        close(client_socket);
-        return;
-    }
+        
+        std::cout << "Received: " << buffer << std::endl;
 
-    std::string cmd;
-    int n;
-    int thread_count;
-    iss >> cmd >> n >> thread_count;
-    if (cmd != "MERGE_SORT" || n <= 0) {
-        std::string err = "ERROR: invalid request.";
-        send(client_socket, err.c_str(), err.size(), 0);
-        close(client_socket);
-        return;
-    }
-
-    if (n <= 0 || n > 1000000) {
-        std::string err = "ERROR: Invalid size\n";
-        send(client_socket, err.c_str(), err.size(), 0);
-        close(client_socket);
-        return;
-    }
-
-    std::vector<int> arr(n);
-    for (int i = 0; i < n; i++) {
-        if (!(iss>>arr[i])) {
-            std::string err = "ERROR: invalid data.";
-            send(client_socket, err.c_str(), err.size(), 0);
+        std::string request(buffer);
+        if (request == "exit") {
             close(client_socket);
-            return;
+            std::cout << "Client disconnected.\n";
+            break;
         }
+
+        std::istringstream iss(buffer);
+        int benchmark_flag;
+        iss >> benchmark_flag;
+        if (benchmark_flag == 1) {
+            std::string result = run_benchmark();
+            send(client_socket, result.c_str(), result.size(), 0);
+            continue;
+        }
+
+        std::string cmd;
+        int n;
+        int thread_count;
+        iss >> cmd >> n >> thread_count;
+        if (cmd != "MERGE_SORT" || n <= 0) {
+            std::string err = "ERROR: invalid request.";
+            send(client_socket, err.c_str(), err.size(), 0);
+            continue;
+        }
+
+        if (n <= 0 || n > 1000000) {
+            std::string err = "ERROR: Invalid size\n";
+            send(client_socket, err.c_str(), err.size(), 0);
+            continue;
+        }
+
+        std::vector<int> arr(n);
+        for (int i = 0; i < n; i++) {
+            if (!(iss>>arr[i])) {
+                std::string err = "ERROR: invalid data.";
+                send(client_socket, err.c_str(), err.size(), 0);
+                return;
+            }
+        }
+
+        auto start = std::chrono::high_resolution_clock::now();
+
+        ThreadPool local_pool(thread_count);
+        parallel_merge_sort(arr, local_pool);
+
+        auto end = std::chrono::high_resolution_clock::now();
+
+        std::cout << "Time: "
+                << std::chrono::duration<double, std::milli>(end - start).count()
+                << " ms\n";
+
+        std::ostringstream oss;
+        for (int x : arr) {
+            oss << x << " ";
+        }
+
+        std::string response = oss.str();
+
+        if (send(client_socket, response.c_str(), response.size(), 0) == -1) {
+            perror("ERROR: send failed.");
+        } 
     }
-
-    auto start = std::chrono::high_resolution_clock::now();
-
-    ThreadPool local_pool(thread_count);
-    parallel_merge_sort(arr, local_pool);
-
-    auto end = std::chrono::high_resolution_clock::now();
-
-    std::cout << "Time: "
-            << std::chrono::duration<double, std::milli>(end - start).count()
-            << " ms\n";
-
-    std::ostringstream oss;
-    for (int x : arr) {
-        oss << x << " ";
-    }
-
-    std::string response = oss.str();
-
-    if (send(client_socket, response.c_str(), response.size(), 0) == -1) {
-        perror("ERROR: send failed.");
-    } 
     close(client_socket);
-    std::cout << "Client disconnected.\n";
 }
 
 void Server::run() {

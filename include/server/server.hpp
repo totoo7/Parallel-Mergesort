@@ -7,6 +7,7 @@ class Server {
     public:
         Server(int port);
         void handle_client(int client_socket);
+        std::string run_benchmark();
         void run();
     private:
         ThreadPool thread_pool;
